@@ -1,0 +1,102 @@
+<script>
+    const videoElement = document.getElementById('webcam');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const statusBox = document.getElementById('status-box');
+    const alertSound = document.getElementById('alert-sound');
+
+    const sensInput = document.getElementById('sensitivity');
+    const timeInput = document.getElementById('timeout');
+    const sensValDisplay = document.getElementById('sens-val');
+    const timeValDisplay = document.getElementById('time-val');
+
+    sensInput.addEventListener('input', (e) => sensValDisplay.innerText = e.target.value);
+    timeInput.addEventListener('input', (e) => timeValDisplay.innerText = e.target.value);
+
+    let lastMouthDistance = 0;
+    let lastChewTime = Date.now();
+    let isAlertPlaying = false;
+
+    function onResults(results) {
+        const movementThreshold = parseFloat(sensInput.value);
+        const chewTimeoutSec = parseFloat(timeInput.value);
+
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+            const landmarks = results.multiFaceLandmarks[0];
+
+            const topLip = landmarks[13];
+            const bottomLip = landmarks[14];
+
+            const lipDistance = Math.hypot(
+                (topLip.x - bottomLip.x) * canvasElement.width,
+                (topLip.y - bottomLip.y) * canvasElement.height
+            );
+
+            const lipDelta = Math.abs(lipDistance - lastMouthDistance);
+            lastMouthDistance = lipDistance;
+
+            const currentTime = Date.now();
+
+            if (lipDelta > movementThreshold) {
+                lastChewTime = currentTime;
+                if (isAlertPlaying) {
+                    alertSound.pause();
+                    alertSound.currentTime = 0;
+                    isAlertPlaying = false;
+                }
+            }
+
+            canvasCtx.fillStyle = '#00FF00';
+            canvasCtx.beginPath();
+            canvasCtx.arc(topLip.x * canvasElement.width, topLip.y * canvasElement.height, 4, 0, 2 * Math.PI);
+            canvasCtx.arc(bottomLip.x * canvasElement.width, bottomLip.y * canvasElement.height, 4, 0, 2 * Math.PI);
+            canvasCtx.fill();
+
+            const idleDuration = (currentTime - lastChewTime) / 1000;
+
+            if (idleDuration > chewTimeoutSec) {
+                statusBox.innerText = `ALERT: AYO NGUNYAH! (${idleDuration.toFixed(1)}s)`;
+                statusBox.className = "diam";
+                if (!isAlertPlaying) {
+                    alertSound.play().catch(e => console.log("Audio autoplay blocked:", e));
+                    isAlertPlaying = true;
+                }
+            } else {
+                statusBox.innerText = `Status: Mengunyah (${idleDuration.toFixed(1)}s)`;
+                statusBox.className = "ngunyah";
+            }
+        } else {
+            statusBox.innerText = "Wajah tidak terdeteksi!";
+            statusBox.className = "diam";
+        }
+        canvasCtx.restore();
+    }
+
+    const faceMesh = new FaceMesh({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+
+    faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+    });
+
+    faceMesh.onResults(onResults);
+
+    // DOKUMENTASI HP: Menggunakan 'facingMode: user' agar selalu memakai kamera selfie HP
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
+            await faceMesh.send({ image: videoElement });
+        },
+        facingMode: 'user',
+        width: 640,
+        height: 480
+    });
+
+    camera.start();
+</script>
