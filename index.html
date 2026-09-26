@@ -18,7 +18,7 @@
         .diam { background-color: #c62828; animation: blink 1s infinite; }
         @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
-        /* Panel Kontrol Slider */
+        /* Panel Kontrol Slider & Dropdown */
         .controls {
             background: #2a2a2a;
             max-width: 400px;
@@ -29,14 +29,22 @@
             text-align: left;
             box-sizing: border-box;
         }
-        .control-group { margin-bottom: 10px; }
+        .control-group { margin-bottom: 12px; }
         .control-group label { display: block; font-size: 13px; margin-bottom: 5px; color: #ddd; }
-        .control-group input[type=range] { width: 100%; cursor: pointer; }
+        .control-group input[type=range], .control-group select { width: 100%; cursor: pointer; }
+        .control-group select {
+            padding: 8px;
+            border-radius: 5px;
+            background: #383838;
+            color: white;
+            border: 1px solid #555;
+            font-size: 14px;
+        }
         .val-badge { font-weight: bold; color: #00e676; }
-        
+
         #start-btn {
-            font-size: 16px; font-weight: bold; padding: 10px 20px; 
-            background: #0288d1; color: white; border: none; 
+            font-size: 16px; font-weight: bold; padding: 10px 20px;
+            background: #0288d1; color: white; border: none;
             border-radius: 5px; cursor: pointer; margin-bottom: 10px;
         }
     </style>
@@ -48,8 +56,16 @@
 
     <div id="status-box" class="ngunyah">Klik tombol di atas untuk memulai</div>
 
-    <!-- Panel Pengaturan Slider -->
+    <!-- Panel Pengaturan Slider & Audio -->
     <div class="controls">
+        <div class="control-group">
+            <label for="audio-select">Pilih Suara Alert:</label>
+            <select id="audio-select" onchange="changeAudioSource(this.value)">
+                <option value="./alert1.mp3">Suara 1 (Default)</option>
+                <option value="./alert2.mp3">Suara 2</option>
+                <option value="./alert3.mp3">Suara 3</option>
+            </select>
+        </div>
         <div class="control-group">
             <label for="sensitivity">Sensitivitas Gerakan Bibir: <span id="sens-val" class="val-badge">2.5</span> px</label>
             <input type="range" id="sensitivity" min="0.5" max="10.0" step="0.1" value="2.5">
@@ -65,8 +81,8 @@
         <canvas id="output_canvas" width="640" height="480"></canvas>
     </div>
 
-    <!-- File Audio Alert (Path relatif relatif ke folder github) -->
-    <audio id="alert-sound" src="./alert.mp3" loop></audio>
+    <!-- File Audio Alert (Default dimuat ke Suara 1) -->
+    <audio id="alert-sound" src="./alert1.mp3" loop></audio>
 
     <script>
         const videoElement = document.getElementById('webcam');
@@ -89,13 +105,33 @@
         let isAlertPlaying = false;
         let isStarted = false;
 
+        // Fungsi mengubah sumber audio saat dropdown dipilih
+        function changeAudioSource(newSrc) {
+            const wasPlaying = isAlertPlaying;
+            alertSound.pause();
+            alertSound.src = newSrc;
+            alertSound.load();
+
+            // Tes putar audio singkat agar terotentikasi izin autoplay browser
+            if (isStarted) {
+                alertSound.play().then(() => {
+                    if (!wasPlaying) {
+                        alertSound.pause();
+                        alertSound.currentTime = 0;
+                    } else {
+                        isAlertPlaying = true;
+                    }
+                }).catch(e => console.log("Gagal ganti audio:", e));
+            }
+        }
+
         function startApp() {
             if (isStarted) return;
             isStarted = true;
             startBtn.style.display = 'none';
             statusBox.innerText = "Menghubungkan Kamera...";
-            
-            // Pancing audio agar browser HP mengizinkan izin Autoplay Audio
+
+            // Pancing audio agar browser HP mengizinkan Autoplay Audio
             alertSound.play().then(() => {
                 alertSound.pause();
                 alertSound.currentTime = 0;
