@@ -1,102 +1,195 @@
-<script>
-    const videoElement = document.getElementById('webcam');
-    const canvasElement = document.getElementById('output_canvas');
-    const canvasCtx = canvasElement.getContext('2d');
-    const statusBox = document.getElementById('status-box');
-    const alertSound = document.getElementById('alert-sound');
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoring Mengunyah - MediaPipe Face Mesh</title>
+    <!-- Library MediaPipe & Camera Utility via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
 
-    const sensInput = document.getElementById('sensitivity');
-    const timeInput = document.getElementById('timeout');
-    const sensValDisplay = document.getElementById('sens-val');
-    const timeValDisplay = document.getElementById('time-val');
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #181818; color: white; padding: 15px; margin: 0; }
+        .container { position: relative; display: inline-block; max-width: 100%; }
+        video, canvas { border-radius: 10px; transform: scaleX(-1); max-width: 100%; height: auto; }
+        canvas { position: absolute; left: 0; top: 0; }
+        #status-box { font-size: 18px; font-weight: bold; margin: 10px auto; padding: 12px; max-width: 400px; border-radius: 8px; }
+        .ngunyah { background-color: #2e7d32; }
+        .diam { background-color: #c62828; animation: blink 1s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
-    sensInput.addEventListener('input', (e) => sensValDisplay.innerText = e.target.value);
-    timeInput.addEventListener('input', (e) => timeValDisplay.innerText = e.target.value);
+        /* Panel Kontrol Slider */
+        .controls {
+            background: #2a2a2a;
+            max-width: 400px;
+            margin: 10px auto;
+            padding: 12px 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            text-align: left;
+            box-sizing: border-box;
+        }
+        .control-group { margin-bottom: 10px; }
+        .control-group label { display: block; font-size: 13px; margin-bottom: 5px; color: #ddd; }
+        .control-group input[type=range] { width: 100%; cursor: pointer; }
+        .val-badge { font-weight: bold; color: #00e676; }
+        
+        #start-btn {
+            font-size: 16px; font-weight: bold; padding: 10px 20px; 
+            background: #0288d1; color: white; border: none; 
+            border-radius: 5px; cursor: pointer; margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
 
-    let lastMouthDistance = 0;
-    let lastChewTime = Date.now();
-    let isAlertPlaying = false;
+    <h2>Monitoring Makan Anak</h2>
+    <button id="start-btn" onclick="startApp()">▶ Aktifkan Kamera & Monitoring</button>
 
-    function onResults(results) {
-        const movementThreshold = parseFloat(sensInput.value);
-        const chewTimeoutSec = parseFloat(timeInput.value);
+    <div id="status-box" class="ngunyah">Klik tombol di atas untuk memulai</div>
 
-        canvasCtx.save();
-        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    <!-- Panel Pengaturan Slider -->
+    <div class="controls">
+        <div class="control-group">
+            <label for="sensitivity">Sensitivitas Gerakan Bibir: <span id="sens-val" class="val-badge">2.5</span> px</label>
+            <input type="range" id="sensitivity" min="0.5" max="10.0" step="0.1" value="2.5">
+        </div>
+        <div class="control-group">
+            <label for="timeout">Toleransi Waktu Diam (Timer Alert): <span id="time-val" class="val-badge">5</span> detik</label>
+            <input type="range" id="timeout" min="1" max="20" step="1" value="5">
+        </div>
+    </div>
 
-        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-            const landmarks = results.multiFaceLandmarks[0];
+    <div class="container">
+        <video id="webcam" width="640" height="480" autoplay playsinline muted></video>
+        <canvas id="output_canvas" width="640" height="480"></canvas>
+    </div>
 
-            const topLip = landmarks[13];
-            const bottomLip = landmarks[14];
+    <!-- File Audio Alert (Path relatif relatif ke folder github) -->
+    <audio id="alert-sound" src="./alert.mp3" loop></audio>
 
-            const lipDistance = Math.hypot(
-                (topLip.x - bottomLip.x) * canvasElement.width,
-                (topLip.y - bottomLip.y) * canvasElement.height
-            );
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const statusBox = document.getElementById('status-box');
+        const alertSound = document.getElementById('alert-sound');
+        const startBtn = document.getElementById('start-btn');
 
-            const lipDelta = Math.abs(lipDistance - lastMouthDistance);
-            lastMouthDistance = lipDistance;
+        const sensInput = document.getElementById('sensitivity');
+        const timeInput = document.getElementById('timeout');
+        const sensValDisplay = document.getElementById('sens-val');
+        const timeValDisplay = document.getElementById('time-val');
 
-            const currentTime = Date.now();
+        sensInput.addEventListener('input', (e) => sensValDisplay.innerText = e.target.value);
+        timeInput.addEventListener('input', (e) => timeValDisplay.innerText = e.target.value);
 
-            if (lipDelta > movementThreshold) {
-                lastChewTime = currentTime;
-                if (isAlertPlaying) {
-                    alertSound.pause();
-                    alertSound.currentTime = 0;
-                    isAlertPlaying = false;
+        let lastMouthDistance = 0;
+        let lastChewTime = Date.now();
+        let isAlertPlaying = false;
+        let isStarted = false;
+
+        function startApp() {
+            if (isStarted) return;
+            isStarted = true;
+            startBtn.style.display = 'none';
+            statusBox.innerText = "Menghubungkan Kamera...";
+            
+            // Pancing audio agar browser HP mengizinkan izin Autoplay Audio
+            alertSound.play().then(() => {
+                alertSound.pause();
+                alertSound.currentTime = 0;
+            }).catch(e => console.log("Audio unlock:", e));
+
+            initCamera();
+        }
+
+        function onResults(results) {
+            const movementThreshold = parseFloat(sensInput.value);
+            const chewTimeoutSec = parseFloat(timeInput.value);
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+
+                const topLip = landmarks[13];
+                const bottomLip = landmarks[14];
+
+                const lipDistance = Math.hypot(
+                    (topLip.x - bottomLip.x) * canvasElement.width,
+                    (topLip.y - bottomLip.y) * canvasElement.height
+                );
+
+                const lipDelta = Math.abs(lipDistance - lastMouthDistance);
+                lastMouthDistance = lipDistance;
+
+                const currentTime = Date.now();
+
+                if (lipDelta > movementThreshold) {
+                    lastChewTime = currentTime;
+                    if (isAlertPlaying) {
+                        alertSound.pause();
+                        alertSound.currentTime = 0;
+                        isAlertPlaying = false;
+                    }
                 }
-            }
 
-            canvasCtx.fillStyle = '#00FF00';
-            canvasCtx.beginPath();
-            canvasCtx.arc(topLip.x * canvasElement.width, topLip.y * canvasElement.height, 4, 0, 2 * Math.PI);
-            canvasCtx.arc(bottomLip.x * canvasElement.width, bottomLip.y * canvasElement.height, 4, 0, 2 * Math.PI);
-            canvasCtx.fill();
+                canvasCtx.fillStyle = '#00FF00';
+                canvasCtx.beginPath();
+                canvasCtx.arc(topLip.x * canvasElement.width, topLip.y * canvasElement.height, 4, 0, 2 * Math.PI);
+                canvasCtx.arc(bottomLip.x * canvasElement.width, bottomLip.y * canvasElement.height, 4, 0, 2 * Math.PI);
+                canvasCtx.fill();
 
-            const idleDuration = (currentTime - lastChewTime) / 1000;
+                const idleDuration = (currentTime - lastChewTime) / 1000;
 
-            if (idleDuration > chewTimeoutSec) {
-                statusBox.innerText = `ALERT: AYO NGUNYAH! (${idleDuration.toFixed(1)}s)`;
-                statusBox.className = "diam";
-                if (!isAlertPlaying) {
-                    alertSound.play().catch(e => console.log("Audio autoplay blocked:", e));
-                    isAlertPlaying = true;
+                if (idleDuration > chewTimeoutSec) {
+                    statusBox.innerText = `ALERT: AYO NGUNYAH! (${idleDuration.toFixed(1)}s)`;
+                    statusBox.className = "diam";
+                    if (!isAlertPlaying) {
+                        alertSound.play().catch(e => console.log("Audio error:", e));
+                        isAlertPlaying = true;
+                    }
+                } else {
+                    statusBox.innerText = `Status: Mengunyah (${idleDuration.toFixed(1)}s)`;
+                    statusBox.className = "ngunyah";
                 }
             } else {
-                statusBox.innerText = `Status: Mengunyah (${idleDuration.toFixed(1)}s)`;
-                statusBox.className = "ngunyah";
+                statusBox.innerText = "Wajah tidak terdeteksi!";
+                statusBox.className = "diam";
             }
-        } else {
-            statusBox.innerText = "Wajah tidak terdeteksi!";
-            statusBox.className = "diam";
+            canvasCtx.restore();
         }
-        canvasCtx.restore();
-    }
 
-    const faceMesh = new FaceMesh({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-    });
+        function initCamera() {
+            const faceMesh = new FaceMesh({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
 
-    faceMesh.setOptions({
-        maxNumFaces: 1,
-        refineLandmarks: true,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-    });
+            faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: true,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
 
-    faceMesh.onResults(onResults);
+            faceMesh.onResults(onResults);
 
-    // DOKUMENTASI HP: Menggunakan 'facingMode: user' agar selalu memakai kamera selfie HP
-    const camera = new Camera(videoElement, {
-        onFrame: async () => {
-            await faceMesh.send({ image: videoElement });
-        },
-        facingMode: 'user',
-        width: 640,
-        height: 480
-    });
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await faceMesh.send({ image: videoElement });
+                },
+                facingMode: 'user',
+                width: 640,
+                height: 480
+            });
 
-    camera.start();
-</script>
+            camera.start().catch(err => {
+                statusBox.innerText = "Gagal Mengakses Kamera! Izinkan akses webcam di browser.";
+                console.error(err);
+            });
+        }
+    </script>
+</body>
+</html>
